@@ -20,7 +20,7 @@ Spark将参与Join的两张表抽象为流式遍历表(streamIter)和查找表(b
 ![Spark Join 流程.png](resources/4B8BF6B37CD27DA1B7E4A134C2D4FBC5.png)
 
 ## Spark SQL解析流程
-![blog_SparkDataframes_image3.png](resources/50907BAB52CB5A657E07E66D84887682.png =561x152)
+![blog_SparkDataframes_image3.png](resources/50907BAB52CB5A657E07E66D84887682.png)
 
 ### Spark 逻辑计划生成
 逻辑计划生成阶段是由AstBuild 将抽象的语法树(AST) 生成Unresolved LogicalPlan开始，然后在此基础上经过解析得到Analyzed LogicalPlan,最后经过优化得到Optimized LogicalPlan
@@ -76,7 +76,7 @@ Spark将参与Join的两张表抽象为流式遍历表(streamIter)和查找表(b
 
 ```
 在withJoinRelations方法中，首先会根据SQL语句中的Join类型构造JoinType对象，然后再此基础上判断查询中是否包含了USING等关键字，并并一步的封装，最终得到一个Join对象的逻辑计划。
-        ![Join.png](resources/1A3322033B7DFEFC4DBCADE48140A683.png =628x535)
+        ![Join.png](resources/1A3322033B7DFEFC4DBCADE48140A683.png)
         
 
 #### Analyzed LogicalPlan
@@ -129,7 +129,7 @@ object ExtractEquiJoinKeys extends Logging with PredicateHelper {
 
 生成物理计划的过程中，JoinSelection根据若干条件判断采用何种类型的Join 执行方式。目前在Spark SQL中，Join执行方式主要有ShuffledHashJoinExec、BroadcastHashJoinExec、SortMergeJoinExec、CartesianProductExec、BroadcastNestedLoopJoinExec。JoinSelection中会有具体的逻辑匹配到各个Join执行方式。
 
-![JoinSelection.png](resources/6C6953FD6A76D02F799E70A8874C3464.png =868x637)
+![JoinSelection.png](resources/6C6953FD6A76D02F799E70A8874C3464.png)
 
 在JoinSelection Join选取逻辑中，BroadcastHashJoinExec的优先级最高。它包含两种情况：
 
