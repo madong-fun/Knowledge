@@ -17,7 +17,7 @@
 
 Spark将参与Join的两张表抽象为流式遍历表(streamIter)和查找表(buildIter)，系统会默认将大表设为streamIter，小表设为buildIter。遍历streamIter中每条记录，然后再buildIter种查找相匹配的记录。这个查找过程称为Build过程，每次Build操作的结果为一条JoinedRow(A,B)，其中A来自streamIter，B来自buildIter，这个过程为BuildRight操作；如果B来自streamIter，A来自buildIter，则为BuildLeft操作。LeftOuter，RightOuter，LeftSemi和LeftAnti,它们的Build类型是确定的，即LeftOuter，LeftSemi和LeftAnti为BuildRight,RightOuter为BuildLeft类型，对于Inner，BuildLeft和BuildRight两种都可以，选择不同，可能有着很大的性能区别。
 
-![Spark Join 流程.png](resources/4B8BF6B37CD27DA1B7E4A134C2D4FBC5.png =948x388)
+![Spark Join 流程.png](resources/4B8BF6B37CD27DA1B7E4A134C2D4FBC5.png)
 
 ## Spark SQL解析流程
 ![blog_SparkDataframes_image3.png](resources/50907BAB52CB5A657E07E66D84887682.png =561x152)
