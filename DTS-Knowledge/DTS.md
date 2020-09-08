@@ -320,6 +320,37 @@
 
 
 
+### 查找第K小/大的元素
+
+
+
+```
+    // 利用二叉搜索树 查找第K小的元素
+    public static TreeNode kSmallest(TreeNode bst, int k){
+
+        Stack<TreeNode> stack = new Stack<>();
+
+        while (bst!= null || !stack.isEmpty()){
+
+            while (bst!= null){
+                stack.push(bst);
+                bst = bst.left;
+            }
+
+            bst = stack.pop();
+            if (--k == 0) break;
+            bst = bst.right;
+        }
+        
+        return bst;
+
+    }
+```
+
+
+
+
+
 ### 二叉搜索树创建
 
 
