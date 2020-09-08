@@ -154,3 +154,77 @@
 **平衡二叉树**： 它或者是一颗空树，或它的左子树和右子树的深度之差(平衡因子)的绝对值不超过1，且它的左子树和右子树都是一颗平衡二叉树。
 
 **最优二叉树（哈夫曼树）**：树的带权路径长度达到最小，称这样的二叉树为最优二叉树，也称为哈夫曼树(Huffman Tree)。哈夫曼树是带权路径长度最短的树，权值较大的结点离根较近。
+
+## 回顾二叉树的遍历
+
+### 1.先序遍历 访问顺序：先根节点，再左子树，最后右子树；
+
+```
+    //二叉树的遍历，前序遍历
+    //访问顺序：先根节点，再左子树，最后右子树；
+    private static List<TreeNode> preOrderTraverse(TreeNode root){
+        List<TreeNode> list = new LinkedList<>();
+        if (root != null){
+            list.add(root);
+            preOrderTraverse(root.getLeft());
+            preOrderTraverse(root.getRight());
+        }
+        return list;
+    }
+```
+
+### 2.中序遍历 访问顺序：先左子树，再根节点，最后右子树；
+
+   ```
+       private static List<TreeNode> inOrderTraverse(TreeNode root){
+        List<TreeNode> list = new LinkedList<>();
+        if (root != null){
+            preOrderTraverse(root.getLeft());
+            list.add(root);
+            preOrderTraverse(root.getRight());
+        }
+        return list;
+    }
+   ```
+### 3.后续遍历 访问顺序：先左子树，再右子树，最后根节点
+
+```
+    private static List<TreeNode> postOrderTraverse(TreeNode root){
+        List<TreeNode> list = new LinkedList<>();
+        if (root != null){
+            preOrderTraverse(root.getLeft());
+            preOrderTraverse(root.getRight());
+            list.add(root);
+        }
+        return list;
+    }
+    
+```
+
+### 4.层序遍历 访问顺序：先从跟节点层次开始，
+
+    ```
+        private static void levelOrderTraverse(TreeNode root){
+        if (root == null) {
+            return;
+        }
+        List<TreeNode> list = new LinkedList<>();
+        LinkedList<TreeNode> queue = new LinkedList<TreeNode>();
+        queue.add(root);
+        TreeNode node;
+        while (!queue.isEmpty()){
+            node = queue.poll();
+            list.add(node);
+            if (node.getLeft() != null) {
+                queue.add(node.getLeft());
+            }
+            if (node.getRight() != null) {
+                queue.add(node.getRight());
+            }
+        }
+    }
+    ```
+
+
+
+
