@@ -203,7 +203,7 @@
 
 ### 4.层序遍历 访问顺序：先从跟节点层次开始，
 
-    ```
+    
         private static void levelOrderTraverse(TreeNode root){
         if (root == null) {
             return;
@@ -223,7 +223,288 @@
             }
         }
     }
-    ```
+    
+
+
+
+### 完全二叉树判定
+
+**方法：** 判断一个树是否属于完全二叉树可以从以下2个条件来判断：
+
+- 任何一个结点如果右孩子不为空，左孩子却是空，则一定不是完全二叉树
+- 当一个结点出现右孩子为空时候，判断该结点的层次遍历后继结点是否为叶子节点，如果全部都是叶子节点，则是完全二叉树，如果存在任何一个结点不是叶节点，则一定不是完全二叉树。
+
+```java
+    // 完全二叉树判定
+    public static boolean isCompleteTree(TreeNode root){
+
+        if (root == null){
+            return false;
+        }
+
+        LinkedList<TreeNode> list = new LinkedList<>();
+        list.offer(root);
+
+        TreeNode node;
+        TreeNode left;
+        TreeNode right;
+        boolean isLeaf = false;
+        while (!list.isEmpty()){
+
+            node = list.poll();
+            left = node.left;
+            right = node.right;
+
+            if (isLeaf && (left == null || right == null)) return false; //开启叶节点判断标志位时，如果层次遍历中的后继结点不是叶节点 -> false
+
+            if (null == left && null != right) return false;  //右孩子不等于空，左孩子等于空  -> false
+
+            if (left != null){
+                list.offer(left);
+            }
+
+            if (right != null){
+                list.offer(right);
+            }else{
+                isLeaf = true;
+            }
+
+
+        }
+
+        return true;
+    }
+```
+
+
+
+### 搜索二叉树判定
+
+二叉搜索树：如果一棵树为空树，那么是二叉搜索树；如果左子树的所有节点都小于根节点，右子树所有节点都大于根节点，那么是二叉搜索树
+
+**方法：** 二叉搜索树是中序有序的，因为左子树<根<右子树
+
+```
+    public static boolean isBST(TreeNode root){
+        Stack<TreeNode> stack = new Stack<>();
+
+        TreeNode node = root;
+
+        List<Integer> list = new ArrayList<>();
+
+        while (stack.isEmpty() || node !=null){
+            while (node != null){
+                stack.push(node);
+                node = node.left;
+            }
+
+            if (!stack.isEmpty()){
+                node = stack.pop();
+                list.add(node.value);
+                node = node.right;
+            }
+
+        }
+
+        for (int i = 1; i < list.size() ; i++) {
+
+            if (list.get(i-1) > list.get(i)){
+                return false;
+            }
+        }
+
+        return true;
+
+    }
+```
+
+
+
+### 二叉搜索树创建
+
+
+
+```java
+    public static TreeNode createBST(int[] tree){
+        TreeNode bst = null;
+        for(int key : tree) {
+            bst = insert(bst,key);
+        }
+        return bst;
+    }
+
+
+    public static TreeNode insert(TreeNode root, int value){
+
+        if (root == null){
+            root = new TreeNode();
+            root.value = value;
+            return root;
+        }else{
+
+            if (value < root.value){
+                root.left = insert(root.left,value);
+            }else {
+                root.left = insert(root.right,value);
+            }
+
+            return root;
+        }
+
+    }
+```
+
+
+
+
+
+### 删除二叉搜索树
+
+[二叉搜索树节点删除]: https://www.cnblogs.com/yahuian/p/10813614.html
+
+二叉搜索树删除节点主要有三种情况：
+
+- 要删除节点有零个孩子，即叶子节点
+- 要删除节点有一个孩子
+- 要删除节点有两个孩子
+
+```
+    private static boolean deleteBST(TreeNode root, int key){
+
+        TreeNode current = root;
+
+        TreeNode parent = new TreeNode();
+
+        Boolean isRight = false;
+
+        while (current.value != key){
+
+            parent = current;
+            if (parent.value < key){
+                current = current.right;
+                isRight = true;
+            }else {
+                current = current.left;
+                isRight = false;
+            }
+
+            if (current == null){
+                return false;
+            }
+        }
+
+        // 1. 要删除节点有零个孩子，即叶子节点
+        if (current.left == null && current.right == null){
+            if (current == root){ // 如果当前要删除 节点为根节点
+                root = null;
+            }else {
+                if (isRight){
+                    parent.right = null;
+                }else {
+                    parent.left = null;
+                }
+            }
+            //2.要删除节点有一个孩子
+        }else if (current.left == null){
+            if (current == root){
+                root = current.right;
+            }else if (isRight){
+                parent.right = current.right;
+            }else {
+                parent.left = current.right;
+            }
+        }else if (current.right == null){
+            if (current == root){
+                root = current.left;
+            }else if (isRight){
+                parent.right =current.left;
+            }else {
+                parent.left = current.left;
+            }
+        }else{  // 3. 要删除节点有两个孩子
+
+            TreeNode successor=getSuccessor(current);    //找到要删除结点的后继结点
+            if(current==root)
+                root=successor;
+            else if(isRight)
+                parent.right=successor;
+            else
+                parent.left=successor;
+
+            successor.left=current.left;
+            return true;
+
+        }
+
+
+
+
+
+        // 3. 要删除节点有两个孩子
+
+        // 3.1 后继节点为待删除节点的右子
+
+
+        return false;
+    }
+
+    //寻找要删除节点的中序后继结点
+    private static TreeNode getSuccessor(TreeNode node){
+
+        TreeNode successorParent = node;
+        TreeNode successor = node;
+        TreeNode current = node.right;
+        //用来寻找后继结点
+        while (current != null){
+            successorParent = successor;
+            successor = current;
+            current = current.left;
+        }
+
+        //如果后继结点为要删除结点的右子树的左子，需要预先调整一下要删除结点的右子树
+        if(successor!=node.right) {
+            successorParent.left=successor.right;
+            successor.right=node.right;
+        }
+        return successor;
+
+    }
+```
+
+
+
+### 二叉搜索树查找
+
+**原理：** 类似于二分查找法
+
+```jAVA
+    /**
+     *  二叉查找树 - 查找
+     * @param root
+     * @param key
+     * @return
+     */
+    public static boolean searchBST(TreeNode root, int key){
+
+        if (root == null){
+            return false;
+        }else {
+            if (root.value == key){
+                return true;
+            }
+            if (root.value > key){
+                searchBST(root.left,key);
+            }else{
+                searchBST(root.right,key);
+            }
+        }
+
+        return false;
+    }
+```
+
+
+
 
 
 
