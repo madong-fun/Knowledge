@@ -1,0 +1,23 @@
+* corePoolSize：核心运行的poolSize，也就是当超过这个范围的时候，就需要将新的Runnable放入到等待队列workQueue中了，我们把这些Runnable就叫做要去执行的任务吧。
+
+* maximumPoolSize：一般你用不到，当大于了这个值就会将任务由一个丢弃处理机制来处理，但是当你发生：newFixedThreadPool的时候，corePoolSize和maximumPoolSize是一样的，而corePoolSize是先执行的，所以他会先被放入等待队列，而不会执行到下面的丢弃处理中，看了后面的代码你就知道了。
+
+* workQueue：等待队列，当达到corePoolSize的时候，就向该等待队列放入线程信息（默认为一个LinkedBlockingQueue），运行中的线程属性为：workers，为一个HashSet；我们的Runnable内部被包装了一层，后面会看到这部分代码；这个队列默认是一个无界队列（你也可以设定一个有界队列），所以在生产者疯狂生产的时候，考虑如何控制的问题。
+
+* keepAliveTime：默认都是0，当线程没有任务处理后，保持多长时间，当你使用：newCachedThreadPool()，它将是60s的时间。这个参数在运行中的线程从workQueue获取任务时，当(poolSize >corePoolSize || allowCoreThreadTimeOut)会用到，当然allowCoreThreadTimeOut要设置为true，也会先判定keepAliveTime是大于0的，不过由于它在corePoolSize上采用了Integer.MAX_VALUE，当遇到系统遇到瞬间冲击，workers就会迅速膨胀，所以这个地方就不要去设置allowCoreThreadTimeOut=true，否则结果是这些运行中的线程会持续60s以上；另外，如果corePoolSize的值还没到Integer.MAX_VALUE，当超过那个值以后，这些运行中的线程，也是
+
+* threadFactory：是构造Thread的方法，你可以自己去包装和传递，主要实现newThread方法即可；
+
+* handler：也就是参数maximumPoolSize达到后丢弃处理的方法，java提供了5种丢弃处理的方法，当然你也可以自己根据实际情况去重写，主要是要实现接口：RejectedExecutionHandler中的方法： public void rejectedExecution(Runnabler, ThreadPoolExecutor e) java默认的是使用：AbortPolicy，他的作用是当出现这中情况的时候会抛出一个异常；
+
+* 线程策略
+1、CallerRunsPolicy：如果发现线程池还在运行，就直接运行这个线程
+2、DiscardOldestPolicy：在线程池的等待队列中，将头取出一个抛弃，然后将当前线程放进去。
+3、DiscardPolicy：什么也不做
+4、AbortPolicy：java默认，抛出一个异常：RejectedExecutionException。
+
+
+
+JVM会在所有的非守护线程（用户线程）执行完毕后退出；
+main线程是用户线程；
+仅有main线程一个用户线程执行完毕，不能决定JVM是否退出，也即是说main线程并不一定是最后一个退出的线程。
