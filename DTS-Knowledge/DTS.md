@@ -365,23 +365,41 @@
     }
 
 
-    public static TreeNode insert(TreeNode root, int value){
+    private static TreeNode insertBST(TreeNode root, int value){
+
+        TreeNode node = new TreeNode(); // 待插入节点
+        node.setValue(value);
 
         if (root == null){
-            root = new TreeNode();
-            root.value = value;
-            return root;
-        }else{
+            root = node;
+        }else { // 寻找待插入节点的父节点
 
-            if (value < root.value){
-                root.left = insert(root.left,value);
-            }else {
-                root.left = insert(root.right,value);
+            TreeNode current = root;
+            TreeNode parent;
+
+            while (current != null){
+                parent = current;
+                if (current.value > value){ // 左子树
+                    current = current.left;
+                    if (current == null){
+                        parent.left = node;
+                        return root;
+                    }
+
+                }else {
+                    current = current.right;
+                    if (current == null){
+                        parent.right = node;
+                        return root;
+                    }
+                }
             }
 
-            return root;
         }
 
+
+
+        return root;
     }
 ```
 
