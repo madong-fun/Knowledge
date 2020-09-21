@@ -88,7 +88,7 @@ default = min(maxPageSize, math.max(minPageSize, size))
 ### 1.4 内存管理接口
 MemoryManager 提供了3个方面的内存管理接口，包括内存申请、释放、获取内存使用情况的接口。
 
-![memoryManager内存管理.jpg](resources/862AE658CB6888D8C173C432FCEE59AA.jpg =1010x693)
+![memoryManager内存管理.jpg](resources/862AE658CB6888D8C173C432FCEE59AA.jpg)
 
 
 

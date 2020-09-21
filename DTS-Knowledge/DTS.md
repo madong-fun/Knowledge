@@ -91,7 +91,7 @@
 
 #### 解法二：
 
-**原理**：双指针移动法
+**原理**：双指针移动法，关于partSort 选择基础数值，是从如果选择最右边元素，遍历时，需要先移动左指针（见partSort方法）；如果选择最左边的元素作为基准数值，需要先移动右指针（见partSort2方法）。
 
 ```
     private static void quickSort2(int[] array,int left,int right){
@@ -131,6 +131,29 @@
 
         return left;
 
+    }
+    
+    public static int partSort2(int[] nums,int left, int right){
+
+        int point = nums[left];
+        int start = left;
+
+        while (left < right){
+
+            while (left < right && nums[right] >= point){
+                right--;
+            }
+
+            while (left < right && nums[left] <= point){
+                left ++;
+            }
+
+            if (left != right){
+                swap(nums,left,right);
+            }
+        }
+        swap2(nums,left,start);
+        return left;
     }
 
 
@@ -203,7 +226,7 @@
 
 ### 4.层序遍历 访问顺序：先从跟节点层次开始，
 
-    
+
         private static void levelOrderTraverse(TreeNode root){
         if (root == null) {
             return;
@@ -223,7 +246,73 @@
             }
         }
     }
-    
+
+
+
+### 路径总和
+
+给定一个二叉树和一个目标和，判断该树中是否存在根节点到叶子节点的路径，这条路径上所有节点值相加等于目标和。
+
+方法：双队列，一个存储节点，一个存储从根到当前节点的Sum。 层序遍历二叉树，判断是否到达叶子节点，如果到达，则判读是否等于目标和。
+
+
+
+```java
+// 循环
+public boolean hasPathSum(TreeNode root, int sum) {
+
+        if(root == null) return false;
+
+        LinkedList<TreeNode> queue = new LinkedList<>();
+        LinkedList<Integer> values = new LinkedList<>();
+        queue.offer(root);
+        values.offer(root.val);
+        TreeNode node;
+        int temp;
+        while(!queue.isEmpty()){
+            node = queue.poll();
+            temp = values.poll();
+
+            if(node.right == null && node.left == null){
+                if(temp == sum){
+                    return true;
+                }
+                continue;
+            }
+
+            if(node.left != null){
+                queue.offer(node.left);
+                values.offer(temp + node.left.val);
+            }
+            if(node.right != null){
+                queue.offer(node.right);
+                values.offer(temp + node.right.val);
+            }
+
+        }
+
+        return false;
+    }
+```
+
+
+
+```java
+    // 递归
+    public boolean hasPathSum(TreeNode root, int sum) {
+
+        if(root == null) return false;
+
+        if(root.right == null && root.left == null){
+            return sum == root.val;
+        }
+
+
+        return hasPathSum(root.left,sum - root.val) || hasPathSum(root.right,sum - root.val);
+    }
+```
+
+
 
 
 

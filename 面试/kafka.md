@@ -156,3 +156,24 @@ topic流量波动情况，这个主要是为了后端应对流量尖峰作准备
 但是还有一种情况就是消息成功写入，而这个时候由于网络问题producer没有收到写入成功的响应，producer就会开启重试的操作，直到网络恢复，消息就发送了多次。这就是at least once了。
 
 kafka producer 的参数acks 的默认值为1，所以默认的producer级别是at least once。并不能exactly once。
+
+**24、Kafka如何保证数据不丢失**
+
+**Kafka如何保障数据不丢失**，即**Kafka的Broker提供了什么机制保证数据不丢失的。**
+
+对于Kafka的Broker而言，Kafka 的**复制机制**和**分区的多副本**架构是Kafka 可靠性保证的核心。把消息写入多个副本可以使Kafka 在发生崩溃时仍能保证消息的持久性。
+
+搞清楚了问题的核心，再来看一下该怎么回答这个问题：主要包括三个方面：
+
+- Topic 副本因子个数：replication.factor >= 3
+- 同步副本列表(ISR)：min.insync.replicas = 2
+- 禁用unclean选举：unclean.leader.election.enable=false
+
+
+
+**24.1 副本因子**
+
+Kafka的topic是可以分区的，并且可以为分区配置多个副本，该配置可以通过`replication.factor`参数实现。
+
+Kafka中的分区副本包括两种类型：领导者副本（Leader Replica）和追随者副本（Follower Replica)，每个分区在创建时都要选举一个副本作为领导者副本，其余的副本自动变为追随者副本。
+

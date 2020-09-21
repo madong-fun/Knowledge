@@ -7,7 +7,7 @@ Flink的失败恢复依赖于 检查点机制 + 可部分重发的数据源。
 检查点机制机制：checkpoint定期触发，产生快照，快照中记录了：
  - 当前检查点开始时数据源（例如Kafka）中消息的offset。
  - 记录了所有有状态的operator当前的状态信息（例如sum中的数值）。
- 
+
 ** 可部分重发的数据源：** Flink选择最近完成的检查点K，然后系统重放整个分布式的数据流，然后给予每个operator他们在检查点k快照中的状态。数据源被设置为从位置Sk开始重新读取流。例如在Apache Kafka中，那意味着告诉消费者从偏移量Sk开始重新消费。
 
 ### Checkpoint 实现
@@ -15,19 +15,19 @@ Flink的失败恢复依赖于 检查点机制 + 可部分重发的数据源。
 Checkpoint是Flink实现容错机制最核心的功能，它能够根据配置周期性地基于Stream中各个Operator/task的状态来生成快照，从而将这些状态数据定期持久化存储下来，当Flink程序一旦意外崩溃时，重新运行程序时可以有选择地从这些快照进行恢复，从而修正因为故障带来的程序数据异常。快照的核心概念之一是barrier。 这些barrier被注入数据流并与记录一起作为数据流的一部分向下流动。 barriers永远不会超过记录，数据流严格有序，barrier将数据流中的记录隔离成一系列的记录集合，并将一些集合中的数据加入到当前的快照中，而另一些数据加入到下一个快照中。
 每个barrier都带有快照的ID，并且barrier之前的记录都进入了该快照。 barriers不会中断流处理，非常轻量级。 来自不同快照的多个barrier可以同时在流中出现，这意味着多个快照可能并发地发生。
 
-![IMAGE](resources/7FFBA879DA361FEDE4348433757CF2FA.jpg =633x236)
+![IMAGE](resources/7FFBA879DA361FEDE4348433757CF2FA.jpg)
 
 barrier在数据流源处被注入并行数据流中。快照n的barriers被插入的位置（记之为Sn）是快照所包含的数据在数据源中最大位置。例如，在Apache Kafka中，此位置将是分区中最后一条记录的偏移量。 将该位置Sn报告给checkpoint协调器（Flink的JobManager）。然后barriers向下游流动。当一个中间操作算子从其所有输入流中收到快照n的barriers时，它会为快照n发出barriers进入其所有输出流中。 一旦sink操作算子（流式DAG的末端）从其所有输入流接收到barriers n，它就向checkpoint协调器确认快照n完成。在所有sink确认快照后，意味快照着已完成。一旦完成快照n，job将永远不再向数据源请求Sn之前的记录，因为此时这些记录（及其后续记录）将已经通过整个数据流拓扑，也即是已经被处理结束。
 
 **多流的barrier：**
-![IMAGE](resources/F762287B983CAE207686E9CAA6D1FEFC.jpg =710x164)
+![IMAGE](resources/F762287B983CAE207686E9CAA6D1FEFC.jpg)
 
 接收多个输入流的运算符需要基于快照barriers上对齐(align)输入流。
  - 一旦操作算子从一个输入流接收到快照barriers n，它就不能处理来自该流的任何记录，直到它从其他输入接收到barriers n为止。 否则，它会搞混属于快照n的记录和属于快照n + 1的记录。
  - barriers n所属的流暂时会被搁置。 从这些流接收的记录不会被处理，而是放入输入缓冲区。可以看到1,2,3会一直放在Input buffer，直到另一个输入流的快照到达Operator。
  - 一旦从最后一个流接收到barriers n，操作算子就会发出所有挂起的向后传送的记录，然后自己发出快照n的barriers。
  - 之后，它恢复处理来自所有输入流的记录，在处理来自流的记录之前优先处理来自输入缓冲区的记录.
- 
+
 
 ### state
 
@@ -40,19 +40,78 @@ state一般指一个具体的task/operator的状态。Flink中包含两种基础
   托管状态是由Flink框架管理的状态，如ValueState, ListState, MapState等。而raw state即原始状态，由用户自行管理状态具体的数据结构，框架在做checkpoint的时候，使用byte[]来读写状态内容。通常在DataStream上的状态推荐使用托管的状态，当实现一个用户自定义的operator时，会使用到原始状态。
 
   这里重点说说State-Keyed State，基于key/value的状态接口，这些状态只能用于keyedStream之上。keyedStream上的operator操作可以包含window或者map等算子操作。这个状态是跟特定的key绑定的，对KeyedStream流上的每一个key，都对应一个state。
-  
+
   key/value下可用的状态接口：
   - ValueState: 状态保存的是一个值，可以通过update()来更新，value()获取。
   - ListState: 状态保存的是一个列表，通过add()添加数据，通过get()方法返回一个Iterable来遍历状态值。
   - ReducingState: 这种状态通过用户传入的reduceFunction，每次调用add方法添加值的时候，会调用reduceFunction，最后合并到一个单一的状态值。
   - MapState：即状态值为一个map。用户通过put或putAll方法添加元素。
-  
+
   以上所述的State对象，仅仅用于与状态进行交互（更新、删除、清空等），而真正的状态值，有可能是存在内存、磁盘、或者其他分布式存储系统中。实际上，这些状态有三种存储方式: HeapStateBackend、MemoryStateBackend、FsStateBackend、RockDBStateBackend。
   - MemoryStateBackend: state数据保存在java堆内存中，执行checkpoint的时候，会把state的快照数据保存到jobmanager的内存中。
   - FsStateBackend: state数据保存在taskmanager的内存中，执行checkpoint的时候，会把state的快照数据保存到配置的文件系统中，可以使用hdfs等分布式文件系统。
   - RocksDBStateBackend: RocksDB跟上面的都略有不同，它会在本地文件系统中维护状态，state会直接写入本地rocksdb中。同时RocksDB需要配置一个远端的filesystem。RocksDB克服了state受内存限制的缺点，同时又能够持久化到远端文件系统中，比较适合在生产中使用。
-  
+
   通过创建一个StateDescriptor，可以得到一个包含特定名称的状态句柄，可以分别创建ValueStateDescriptor、 ListStateDescriptor或ReducingStateDescriptor状态句柄。状态是通过RuntimeContext来访问的，因此只能在RichFunction中访问状态。这就要求UDF时要继承Rich函数，例如RichMapFunction、RichFlatMapFunction等。
+
+### unaligned checkpoint 非对齐检查点
+
+
+
+#### barrier对齐风险
+
+在FLink的checkpoint机制当中，barrier是划分快照（状态）的边界。在启用exactly-once语义的条件下，当一个算子有多个输入流时，需要等待所有输入流中当前checkpoint的barrier都到达其输入缓冲区，才能安全触发checkpoint，否则检查点N的快照数据和检查点N + 1的快照数据就会混在一起。如下图是所示：
+
+![Aligning data streams at operators with multiple inputs](D:\workspace\workspace-github\Knowledge\big-data\resouces\stream_aligning.svg)
+
+
+
+屏障对齐不仅保证了状态的准确性，还巧妙地消去了原生C-L算法中记录输入流状态的步骤，十分轻量级。
+
+当时barrier对齐是阻塞式的，当作业出现反压时能会成为不定时炸弹。众所周知，checkpoint的barrier是从source端产生并源源不断的向下游流动的。如果作业出现了反压，数据的流动速度就会减慢，barrier到达下游算子的延迟就会变大，进而影响到checkpoint完成的延时（变大甚至超时失败）。如果反压长久不能得到解决，快照数据与实际数据之间的差距就越来越明显，一旦作业failover，势必丢失较多的处理进度。另一方面，作业恢复后需要重新处理的数据又会积压，加重反压，造成恶性循环。
+
+为了规避风险，Flink 1.11版本中通过[FLIP-76](https://links.jianshu.com/go?to=https%3A%2F%2Fcwiki.apache.org%2Fconfluence%2Fdisplay%2FFLINK%2FFLIP-76%3A%2BUnaligned%2BCheckpoints)引入了非对齐检查点（unaligned checkpoint）的feature
+
+#### unaligned checkpoint
+
+顾名思义，非对齐的checkpoint取消了barrier对齐的操作。原理图如下：
+
+![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\unaligned-checkpoint)
+
+
+
+简单来说：
+
+1. 当算子的所有输入流中的第一个barrier到达算子的输入缓冲区时，立即将这个屏障发往下游（输出缓冲区）。
+
+2. 由于第一个屏障没有被阻塞，它的步调会比较快，超过一部分缓冲区中的数据。算子会标记两部分数据：一是屏障首先到达的那条流中被超过的数据，二是其他流中位于当前检查点屏障之前的所有数据（当然也包括进入了输入缓冲区的数据）。
+
+   ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\unaligned-barrier)
+
+3. 将上述两部分数据连同算子的状态一起做异步快照。
+
+   由此可见，非对齐检查点的机制与原生C-L算法更为相似一些（即需要由算子来记录输入流的状态）。它与对齐检查点的区别主要有三：
+
+   1. 对齐检查点在最后一个屏障到达算子时触发，非对齐检查点在第一个屏障到达算子时就触发。
+   2. 对齐检查点在第一个屏障到最后一个屏障到达的区间内是阻塞的，而非对齐检查点不需要阻塞。
+   3. 对齐检查点能够保持快照N~N + 1之间的边界，但非对齐检查点模糊了这个边界。
+
+   所以，即使再考虑反压的情况，屏障也不会因为输入流速度变慢而堵在各个算子的入口处，而是能比较顺畅地由Source端直达Sink端，从而缓解检查点失败超时的现象。
+
+   既然不同检查点的数据都混在一起了，非对齐检查点还能保证exactly once语义吗？答案是肯定的。当任务从非对齐检查点恢复时，除了对齐检查点也会涉及到的Source端重放和算子的计算状态恢复之外，未对齐的流数据也会被恢复到各个链路，三者合并起来就是能够保证exactly once的完整现场了。
+
+   非对齐检查点目前仍然作为试验性的功能存在，并且它也不是十全十美的（所谓优秀的implementation往往都要考虑trade-off），主要缺点有二：
+
+   - 需要额外保存数据流的现场，总的状态大小可能会有比较明显的膨胀。
+   - 从状态恢复时也需要额外恢复数据流的现场，作业重新拉起的耗时可能会很长。特别地，如果第一次恢复失败，有可能触发death spiral（死亡螺旋）使得作业永远无法恢复。
+
+   所以，官方当前推荐仅将它应用于那些容易产生反压且I/O压力较小（比如原始状态不太大）的作业中。
+
+   
+
+
+
+
 
 ### checkpoint 设置
 
@@ -111,3 +170,13 @@ Checkpoint的生命周期由Flink管理，即Flink创建，拥有和发布Checkp
 
 如果未手动指定ID，则会自动生成这些ID。只要这些ID不变，就可以从保存点自动恢复。生成的ID取决于程序的结构，并且对程序更改很敏感。因此，强烈建议手动分配这些ID。
 触发保存点时，会创建一个新的保存点目录，其中将存储数据和元数据。可以通过配置默认目标目录或使用触发器命令指定自定义目标目录来控制此目录的位置。
+
+
+
+checkpoint和savepoint二者的区别：
+
+本质上来说是相似的，用途却是不同的。
+
+checkpoint用来故障恢复
+
+savepoint则是非故障情况下，用来恢复运行。比如集群迁移，升级等
