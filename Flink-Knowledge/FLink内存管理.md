@@ -10,7 +10,9 @@
 
 ## 积极的内存管理
 
-FLink并不是将大量的对象存在堆上，而是将对象都序列化到一个预分配的内存块上，即MemorySegment。它代表了一段固定长度的内存（默认大小为 32KB），也是 Flink 中最小的内存分配单元，并且提供了非常高效的读写方法。MemorySegment非常像java.nio.ByteBuffer。它的底层可以是一个普通的 Java 字节数组（`byte[]`），也可以是一个申请在堆外的 `ByteBuffer`。每条记录都会以序列化的形式存储在一个或多个`MemorySegment`中。
+FLink并不是将大量的对象存在堆上，而是将对象都序列化到一个预分配的内存块上，即MemorySegment。它代表了一段固定长度的内存（默认大小为 32KB），也是 Flink 中最小的内存分配单元，并且使用Java unsafe方法提供了非常高效的读写操作。MemorySegment非常像java.nio.ByteBuffer。它的底层可以是一个普通的 Java 字节数组（`byte[]`），也可以是一个申请在堆外的 `ByteBuffer`。每条记录都会以序列化的形式存储在一个或多个`MemorySegment`中。Flink实现了Java的java.io.DataOutput` 和` java.io.DataInput两个接口的逻辑视图，便于能够像操作较大的连续的内存块一样操作数量众多的MemorySegment。
+
+MemorySegments 在TaskManager创建时立刻被分别，TaskManager关闭时被销毁。因此，MemorySegments 在整个TaskManager生命周期内都会被重复利用而不会被GC.
 
 Flink 中的 Worker 名叫 TaskManager，是用来运行用户代码的 JVM 进程。TaskManager 的堆内存主要被分成了三个部分：
 
@@ -29,9 +31,229 @@ Flink 采用类似 DBMS 的 sort 和 join 算法，直接操作二进制数据�
 FLink这种积极的内存 管理和直接操作二进制数据的方式有以下几点好处：
 
 - **内存运行安全**：由于所有的运行时数据结构和算法只能通过内存池申请内存，可以有效地监控剩余内存资源。在内存吃紧的情况下，算子（sort/join等）会高效的将一大批内存写到磁盘，之后再读回来，因此可以有效的避免`OutOfMemoryErrors` 。
+
 - **减少GC压力：** 因为所有常驻型数据都以二进制的形式存在 Flink 的`MemoryManager`中，这些`MemorySegment`一直呆在老年代而不会被GC回收。其他的数据对象基本上是由用户代码生成的短生命周期对象，这部分对象可以被 Minor GC 快速回收。只要用户不去创建大量类似缓存的常驻型对象，那么老年代的大小是不会变的，Major GC也就永远不会发生。从而有效地降低了垃圾回收的压力。另外，这里的内存块还可以是堆外内存，这可以使得 JVM 内存更小，从而加速垃圾回收。
 
+- **节省内存空间：** Java对象在存储上有很多额外的消耗，而直接存储实际的数据的二进制内容，就可以避免消耗，节省内存资源。
 
+- **高效的二进制操作与缓存友好的计算：** 二进制数据以定义好的格式存储，可以高效地比较与操作。另外，该二进制形式可以把相关的值，以及hash值，键值和指针等相邻地放进内存中。这使得数据结构可以对高速缓存更友好，可以从 L1/L2/L3 缓存获得性能的提升（下文会详细解释）。
 
+  ## 序列化
 
+  目前Java生态系统中提供了众多的序列化框架，诸如Java serialization, [Kryo](https://github.com/EsotericSoftware/kryo), [Apache Avro](http://avro.apache.org/), [Apache Thrift](http://thrift.apache.org/), 或者 Google’s [Protobuf](https://github.com/google/protobuf).  
 
+  为了能够控制二进制数据的序列化与反序列化，Flink实现了自己的序列化框架。
+
+  因为在 Flink 中处理的数据流通常是同一类型，由于数据集对象的类型固定，对于数据集可以只保存一份对象Schema信息，节省大量的存储空间。同时，对于固定大小的类型，也可通过固定的偏移位置存取。当我们需要访问某个对象成员变量的时候，通过定制的序列化工具，并不需要反序列化整个Java对象，而是可以直接通过偏移量，只是反序列化特定的对象成员变量。如果对象的成员变量较多时，能够大大减少Java对象的创建开销，以及内存数据的拷贝大小。
+
+  Flink支持任意的Java或者Scala类型，link 在数据类型上有很大的进步，不需要实现一个特定的接口（像Hadoop中的`org.apache.hadoop.io.Writable`），Flink 能够自动识别数据类型。Flink 通过 Java Reflection 框架分析基于 Java 的 Flink 程序 UDF (User Define Function)的返回类型的类型信息，通过 Scala Compiler 分析基于 Scala 的 Flink 程序 UDF 的返回类型的类型信息。类型信息由 `TypeInformation` 类表示，TypeInformation 支持以下几种类型：
+
+  - BasicTypeInfo：任意Java 基本类型（装箱的）或 String 类型。
+  - BasicArrayTypeInfo：任意Java基本类型数组（装箱的）或 String 数组。
+  - WritableTypeInfo：任意 Hadoop Writable 接口的实现类。
+  - TupleTypeInfo: 任意的 Flink Tuple 类型(支持Tuple1 to Tuple25)。Flink tuples 是固定长度固定类型的Java Tuple实现。
+  - CaseClassTypeInfo: 任意的 Scala CaseClass(包括 Scala tuples)。
+  - PojoTypeInfo: 任意的 POJO (Java or Scala)，例如，Java对象的所有成员变量，要么是 public 修饰符定义，要么有 getter/setter 方法。
+  - GenericTypeInfo: 任意无法匹配之前几种类型的类. 
+
+  针对前六种类型数据集，Flink皆可以自动生成对应的TypeSerializer，能非常高效地对数据集进行序列化和反序列化。对于GenericTypeInfo，Flink会使用Kryo进行序列化和反序列化。每个TypeInformation中，都包含了serializer，类型会自动通过serializer进行序列化，然后用Java Unsafe接口写入MemorySegments。对于可以用作key的数据类型，Flink还同时自动生成TypeComparator，用来辅助直接对序列化后的二进制数据进行compare、hash等操作。对于 Tuple、CaseClass、POJO 等组合类型，其TypeSerializer和TypeComparator也是组合的，序列化和比较时会委托给对应的serializers和comparators。如下图展示 一个内嵌型的Tuple3<Integer,Double,Person> 对象的序列化过程。
+
+  ```
+  public class Person {
+      public int id;
+      public String name;
+  }
+  ```
+
+  
+
+  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\data-serialization.png)
+
+  
+
+  可以看出这种序列化方式存储密度是相当紧凑的。其中 int 占4字节，double 占8字节，POJO多个一个字节的header，PojoSerializer只负责将header序列化进去，并委托每个字段对应的serializer对字段进行序列化。
+
+  Flink 的类型系统可以很轻松地扩展出自定义的TypeInformation、Serializer以及Comparator，来提升数据类型在序列化和比较时的性能。
+
+  
+
+  ## Flink如何直接操作二进制数据
+
+  和其他的数据计算引擎一样，Flink的API同样提供了诸如group、sort、join等操作。这里，我们以sort为例，这是一个在 Flink 中使用非常频繁的操作。
+
+  
+
+  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\sorting-binary-data-1.png)
+
+  首先，Flink 会从 MemoryManager 中申请一批 MemorySegment，我们把这批 MemorySegment 称作 sort buffer，用来存放排序的数据。我们会把 sort buffer 分成两块区域。一个区域是用来存放所有对象完整的二进制数据。另一个区域用来存放指向完整二进制数据的指针以及定长的序列化后的key（key+pointer）。如果需要序列化的key是个变长类型，如String，则会取其前缀序列化。如上图所示，当一个对象要加到 sort buffer 中时，它的二进制数据会被加到第一个区域，指针（可能还有key）会被加到第二个区域。
+
+  将实际的数据和指针加定长key分开存放有两个目的。第一，交换定长块（key+pointer）更高效，不用交换真实的数据也不用移动其他key和pointer。第二，这样做是缓存友好的，因为key都是连续存储在内存中的，可以大大减少 cache miss（后面会详细解释）。
+
+  排序的关键是比大小和交换。Flink 中，会先用 key 比大小，这样就可以直接用二进制的key比较而不需要反序列化出整个对象。因为key是定长的，所以如果key相同（或者没有提供二进制key），那就必须将真实的二进制数据反序列化出来，然后再做比较。之后，只需要交换key+pointer就可以达到排序的效果，真实的数据不用移动。
+
+  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\sorting-binary-data-2.png)
+
+  
+
+  最后，访问排序后的数据，可以沿着排好序的key+pointer区域顺序访问，通过pointer找到对应的真实数据，并写到内存或外部。
+
+  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\sorting-binary-data-3.png)
+
+  ## 缓存友好的数据结构和算法
+
+  随着磁盘IO和网络IO越来越快，CPU逐渐成为了大数据领域的瓶颈。从 L1/L2/L3 缓存读取数据的速度比从主内存读取数据的速度快好几个量级。通过性能分析可以发现，CPU时间中的很大一部分都是浪费在等待数据从主内存过来上。如果这些数据可以从 L1/L2/L3 缓存过来，那么这些等待时间可以极大地降低，并且所有的算法会因此而受益。
+
+  在上面讨论中我们谈到的，Flink 通过定制的序列化框架将算法中需要操作的数据（如sort中的key）连续存储，而完整数据存储在其他地方。因为对于完整的数据来说，key+pointer更容易装进缓存，这大大提高了缓存命中率，从而提高了基础算法的效率。这对于上层应用是完全透明的，可以充分享受缓存友好带来的性能提升。
+
+  
+
+  ## 堆外内存
+
+  Flink 基于堆内存的内存管理机制已经非常先进，为什么还要引入对外内存呢？
+
+  - 启动超大内存（上百GB）的JVM，初始化和分配堆内存需要花费很长的时间，GC停留时长也会很长（分钟级）。使用堆外内存的话，可以极大地减小堆内存（只需要分配Remaining Heap那一块），使得 TaskManager 扩展到上百GB内存不是问题。
+  - IO和网络传输可以更加高效。在大多数的情况下，我们需要将MemorySegments 移除到磁盘或者进行网络传输。堆外内存在写磁盘或网络传输时是 zero-copy，而堆内存的话，至少需要 copy 一次。
+  - 堆外内存可以在进程间共享。也就是说，即使JVM进程崩溃也不会丢失数据。这可以用来做故障恢复（Flink暂时没有利用起这个，不过未来很可能会去做）。
+
+  但是强大的东西总是会有其负面的一面，不然为何大家不都用堆外内存呢。
+
+  - 堆内存的使用、监控、调试都要简单很多。堆外内存意味着更复杂更麻烦。
+  - Flink 有时需要分配短生命周期的 `MemorySegment`，这个申请在堆上会更廉价。
+  - 有些操作在堆内存上会快一点点（JIT 可能优化的会更好）。
+
+  Flink用通过`ByteBuffer.allocateDirect(numBytes)`来申请堆外内存，用 `sun.misc.Unsafe` 来操作堆外内存。基于 Flink 优秀的设计，实现堆外内存是很方便的。Flink 将原来的 `MemorySegment` 变成了抽象类，并生成了两个子类。`HeapMemorySegment` 和 `HybridMemorySegment`。前者只能用来分配和管理堆内存，而后者既可以用来管理堆内存和堆外内存。
+
+  Flink 有时需要分配短生命周期的 buffer，这些buffer用`HeapMemorySegment`会更高效。那么当使用堆外内存时，为了也满足堆内存的需求，我们需要同时加载两个子类。这就涉及到了 JIT 编译优化的问题。因为以前 `MemorySegment` 是一个单独的 final 类，没有子类。JIT 编译时，所有要调用的方法都是确定的，所有的方法调用都可以被去虚化（de-virtualized）和内联（inlined），这可以极大地提高性能（MemroySegment的使用相当频繁）。然而如果同时加载两个子类，那么 JIT 编译器就只能在真正运行到的时候才知道是哪个子类，这样就无法提前做优化。实际测试的性能差距在 2.7 被左右。
+
+  
+
+  Flink 使用了两种方案：
+
+  1. **只能有一种 MemorySegment 实现被加载**
+
+  代码中所有的短生命周期和长生命周期的MemorySegment都实例化其中一个子类，另一个子类根本没有实例化过（使用工厂模式来控制）。那么运行一段时间后，JIT 会意识到所有调用的方法都是确定的，然后会做优化。
+
+  2. **提供一种实现能同时处理堆内存和堆外内存**
+
+  这就是 `HybridMemorySegment` 了，能同时处理堆与堆外内存，这样就不需要子类了。这里 Flink 优雅地实现了一份代码能同时操作堆和堆外内存。这主要归功于 `sun.misc.Unsafe`提供的一系列方法，如getLong方法：
+
+  ```
+  sun.misc.Unsafe.getLong(Object reference, long offset)
+  ```
+
+  - 如果reference不为空，则会取该对象的地址，加上后面的offset，从相对地址处取出8字节并得到 long。这对应了堆内存的场景。
+  - 如果reference为空，则offset就是要操作的绝对地址，从该地址处取出数据。这对应了堆外内存的场景。
+
+  ```java
+  public class MemorySegment {
+  
+    private final byte[] heapMemory;  // non-null in heap case, null in off-heap case
+    private final long address;       // may be absolute, or relative to byte[]
+  
+  
+    // method of interest
+    public long getLong(int pos) {
+      return UNSAFE.getLong(heapMemory, address + pos);
+    }
+  
+  
+  	/**
+  	 * Creates a new memory segment that represents the memory of the byte array.
+  	 *
+  	 * <p>Since the byte array is backed by on-heap memory, this memory segment holds its
+  	 * data on heap. The buffer must be at least of size 8 bytes.
+  	 *
+  	 * @param buffer The byte array whose memory is represented by this memory segment.
+  	 */
+  	MemorySegment(byte[] buffer, Object owner) {
+  		if (buffer == null) {
+  			throw new NullPointerException("buffer");
+  		}
+  
+  		this.heapMemory = buffer;
+  		this.address = BYTE_ARRAY_BASE_OFFSET;
+  		this.size = buffer.length;
+  		this.addressLimit = this.address + this.size;
+  		this.owner = owner;
+  	}
+    
+  	/**
+  	 * Creates a new memory segment that represents the memory at the absolute address given
+  	 * by the pointer.
+  	 *
+  	 * @param offHeapAddress The address of the memory represented by this memory segment.
+  	 * @param size The size of this memory segment.
+  	 */
+  	MemorySegment(long offHeapAddress, int size, Object owner) {
+  		if (offHeapAddress <= 0) {
+  			throw new IllegalArgumentException("negative pointer or size");
+  		}
+  		if (offHeapAddress >= Long.MAX_VALUE - Integer.MAX_VALUE) {
+  			// this is necessary to make sure the collapsed checks are safe against numeric overflows
+  			throw new IllegalArgumentException("Segment initialized with too large address: " + offHeapAddress
+  					+ " ; Max allowed address is " + (Long.MAX_VALUE - Integer.MAX_VALUE - 1));
+  		}
+  
+  		this.heapMemory = null;
+  		this.address = offHeapAddress;
+  		this.addressLimit = this.address + size;
+  		this.size = size;
+  		this.owner = owner;
+  	}
+  }
+  
+  public final class HybridMemorySegment extends MemorySegment {
+     	@Nullable
+  	private ByteBuffer offHeapBuffer;
+      
+      HybridMemorySegment(@Nonnull ByteBuffer buffer, @Nullable Object owner) {
+  		super(getByteBufferAddress(buffer), buffer.capacity(), owner);
+  		this.offHeapBuffer = buffer;
+  	}
+      
+      HybridMemorySegment(byte[] buffer, Object owner) {
+  		super(buffer, owner);
+  		this.offHeapBuffer = null;
+  	}
+      
+  }
+  ```
+
+  
+
+  可以发现，HybridMemorySegment 中的很多方法其实都下沉到了父类去实现。包括堆内堆外内存的初始化。`MemorySegment` 中的 `getXXX`/`putXXX` 方法都是调用了 unsafe 方法，可以说`MemorySegment`已经具有了些 Hybrid 的意思了。`HeapMemorySegment`只调用了父类的`MemorySegment(byte[] buffer, Object owner)`方法，也就只能申请堆内存。另外，阅读代码你会发现，许多方法（大量的 getXXX/putXXX）都被标记成了 final，两个子类也是 final 类型，为的也是优化 JIT 编译器，会提醒 JIT 这个方法是可以被去虚化和内联的。
+
+  对于堆外内存，使用 `HybridMemorySegment` 能同时用来代表堆和堆外内存。这样只需要一个类就能代表长生命周期的堆外内存和短生命周期的堆内存。既然`HybridMemorySegment`已经这么全能，为什么还要方案1呢？因为我们需要工厂模式来保证只有一个子类被加载（为了更高的性能），而且HeapMemorySegment比heap模式的HybridMemorySegment要快。
+
+  
+
+  | Segment                                    | Time        |
+  | :----------------------------------------- | :---------- |
+  | `HeapMemorySegment`, exclusive             | 1,441 msecs |
+  | `HeapMemorySegment`, mixed                 | 3,841 msecs |
+  | `HybridMemorySegment`, heap, exclusive     | 1,626 msecs |
+  | `HybridMemorySegment`, off-heap, exclusive | 1,628 msecs |
+  | `HybridMemorySegment`, heap, mixed         | 3,848 msecs |
+  | `HybridMemorySegment`, off-heap, mixed     | 3,847 msecs |
+
+  
+
+  ## 参考资料
+
+  - [Off-heap Memory in Apache Flink and the curious JIT compiler](https://flink.apache.org/news/2015/09/16/off-heap-memory.html)
+
+  - [Juggling with Bits and Bytes](https://flink.apache.org/news/2015/05/11/Juggling-with-Bits-and-Bytes.html)
+
+  - [Peeking into Apache Flink’s Engine Room](https://flink.apache.org/news/2015/03/13/peeking-into-Apache-Flinks-Engine-Room.html)
+
+  - [Flink: Memory Management](https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=53741525)
+
+  - [Big Data Performance Engineering](http://www.bigsynapse.com/addressing-big-data-performance)
+
+    
+
+  
+
+  
+
+  
