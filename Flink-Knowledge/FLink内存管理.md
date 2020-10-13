@@ -12,7 +12,7 @@
 
 FLink并不是将大量的对象存在堆上，而是将对象都序列化到一个预分配的内存块上，即MemorySegment。它代表了一段固定长度的内存（默认大小为 32KB），也是 Flink 中最小的内存分配单元，并且使用Java unsafe方法提供了非常高效的读写操作。MemorySegment非常像java.nio.ByteBuffer。它的底层可以是一个普通的 Java 字节数组（`byte[]`），也可以是一个申请在堆外的 `ByteBuffer`。每条记录都会以序列化的形式存储在一个或多个`MemorySegment`中。Flink实现了Java的java.io.DataOutput` 和` java.io.DataInput两个接口的逻辑视图，便于能够像操作较大的连续的内存块一样操作数量众多的MemorySegment。
 
-MemorySegments 在TaskManager创建时立刻被分别，TaskManager关闭时被销毁。因此，MemorySegments 在整个TaskManager生命周期内都会被重复利用而不会被GC.
+MemorySegments 在TaskManager创建时立刻被分配，TaskManager关闭时被销毁。因此，MemorySegments 在整个TaskManager生命周期内都会被重复利用而不会被GC.
 
 Flink 中的 Worker 名叫 TaskManager，是用来运行用户代码的 JVM 进程。TaskManager 的堆内存主要被分成了三个部分：
 
@@ -46,7 +46,7 @@ FLink这种积极的内存 管理和直接操作二进制数据的方式有以�
 
   因为在 Flink 中处理的数据流通常是同一类型，由于数据集对象的类型固定，对于数据集可以只保存一份对象Schema信息，节省大量的存储空间。同时，对于固定大小的类型，也可通过固定的偏移位置存取。当我们需要访问某个对象成员变量的时候，通过定制的序列化工具，并不需要反序列化整个Java对象，而是可以直接通过偏移量，只是反序列化特定的对象成员变量。如果对象的成员变量较多时，能够大大减少Java对象的创建开销，以及内存数据的拷贝大小。
 
-  Flink支持任意的Java或者Scala类型，link 在数据类型上有很大的进步，不需要实现一个特定的接口（像Hadoop中的`org.apache.hadoop.io.Writable`），Flink 能够自动识别数据类型。Flink 通过 Java Reflection 框架分析基于 Java 的 Flink 程序 UDF (User Define Function)的返回类型的类型信息，通过 Scala Compiler 分析基于 Scala 的 Flink 程序 UDF 的返回类型的类型信息。类型信息由 `TypeInformation` 类表示，TypeInformation 支持以下几种类型：
+  Flink支持任意的Java或者Scala类型，Flink 在数据类型上有很大的进步，不需要实现一个特定的接口（像Hadoop中的`org.apache.hadoop.io.Writable`），Flink 能够自动识别数据类型。Flink 通过 Java Reflection 框架分析基于 Java 的 Flink 程序 UDF (User Define Function)的返回类型的类型信息，通过 Scala Compiler 分析基于 Scala 的 Flink 程序 UDF 的返回类型的类型信息。类型信息由 `TypeInformation` 类表示，TypeInformation 支持以下几种类型：
 
   - BasicTypeInfo：任意Java 基本类型（装箱的）或 String 类型。
   - BasicArrayTypeInfo：任意Java基本类型数组（装箱的）或 String 数组。

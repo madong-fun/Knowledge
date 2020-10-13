@@ -1,5 +1,4 @@
-
-##架构
+## 架构
 
 ![distributed-runtime.svg](resources/distributed-runtime.svg)
 
