@@ -16,7 +16,7 @@ MemorySegments 在TaskManager创建时立刻被分配，TaskManager关闭时被�
 
 Flink 中的 Worker 名叫 TaskManager，是用来运行用户代码的 JVM 进程。TaskManager 的堆内存主要被分成了三个部分：
 
-![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\taskManager-merroy.md)
+![img](..\big-data\resouces\taskManager-merroy.md)
 
 - **Network Buffers** ： 一定数量的32KB大小的 buffer，主要用于数据的网络传输。在 TaskManager 启动的时候就会分配。默认数量是 2048 个，可以通过 `taskmanager.network.numberOfBuffers` 来配置。
 - **Memory Manager Pool**：这是一个由 `MemoryManager` 管理的，由众多`MemorySegment`组成的超大集合。Flink 中的算法（如 sort/shuffle/join）会向这个内存池申请 MemorySegment，将序列化后的数据存于其中，使用完后释放回内存池。默认情况下，池子占了堆内存的 70% 的大小。
@@ -67,7 +67,7 @@ FLink这种积极的内存 管理和直接操作二进制数据的方式有以�
 
   
 
-  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\data-serialization.png)
+  ![img](..\big-data\resouces\data-serialization.png)
 
   
 
@@ -83,7 +83,7 @@ FLink这种积极的内存 管理和直接操作二进制数据的方式有以�
 
   
 
-  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\sorting-binary-data-1.png)
+  ![img](..\big-data\resouces\sorting-binary-data-1.png)
 
   首先，Flink 会从 MemoryManager 中申请一批 MemorySegment，我们把这批 MemorySegment 称作 sort buffer，用来存放排序的数据。我们会把 sort buffer 分成两块区域。一个区域是用来存放所有对象完整的二进制数据。另一个区域用来存放指向完整二进制数据的指针以及定长的序列化后的key（key+pointer）。如果需要序列化的key是个变长类型，如String，则会取其前缀序列化。如上图所示，当一个对象要加到 sort buffer 中时，它的二进制数据会被加到第一个区域，指针（可能还有key）会被加到第二个区域。
 
@@ -91,13 +91,13 @@ FLink这种积极的内存 管理和直接操作二进制数据的方式有以�
 
   排序的关键是比大小和交换。Flink 中，会先用 key 比大小，这样就可以直接用二进制的key比较而不需要反序列化出整个对象。因为key是定长的，所以如果key相同（或者没有提供二进制key），那就必须将真实的二进制数据反序列化出来，然后再做比较。之后，只需要交换key+pointer就可以达到排序的效果，真实的数据不用移动。
 
-  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\sorting-binary-data-2.png)
+  ![img](..\big-data\resouces\sorting-binary-data-2.png)
 
   
 
   最后，访问排序后的数据，可以沿着排好序的key+pointer区域顺序访问，通过pointer找到对应的真实数据，并写到内存或外部。
 
-  ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\sorting-binary-data-3.png)
+  ![img](..\big-data\resouces\sorting-binary-data-3.png)
 
   ## 缓存友好的数据结构和算法
 
