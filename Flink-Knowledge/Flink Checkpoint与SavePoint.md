@@ -62,7 +62,7 @@ state一般指一个具体的task/operator的状态。Flink中包含两种基础
 
 在FLink的checkpoint机制当中，barrier是划分快照（状态）的边界。在启用exactly-once语义的条件下，当一个算子有多个输入流时，需要等待所有输入流中当前checkpoint的barrier都到达其输入缓冲区，才能安全触发checkpoint，否则检查点N的快照数据和检查点N + 1的快照数据就会混在一起。如下图是所示：
 
-![Aligning data streams at operators with multiple inputs](D:\workspace\workspace-github\Knowledge\big-data\resouces\stream_aligning.svg)
+![Aligning data streams at operators with multiple inputs](..\big-data\resouces\stream_aligning.svg)
 
 
 
@@ -76,7 +76,7 @@ state一般指一个具体的task/operator的状态。Flink中包含两种基础
 
 顾名思义，非对齐的checkpoint取消了barrier对齐的操作。原理图如下：
 
-![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\unaligned-checkpoint)
+![img](..\big-data\resouces\unaligned-checkpoint)
 
 
 
@@ -86,7 +86,7 @@ state一般指一个具体的task/operator的状态。Flink中包含两种基础
 
 2. 由于第一个屏障没有被阻塞，它的步调会比较快，超过一部分缓冲区中的数据。算子会标记两部分数据：一是屏障首先到达的那条流中被超过的数据，二是其他流中位于当前检查点屏障之前的所有数据（当然也包括进入了输入缓冲区的数据）。
 
-   ![img](D:\workspace\workspace-github\Knowledge\big-data\resouces\unaligned-barrier)
+   ![img](..\big-data\resouces\unaligned-barrier)
 
 3. 将上述两部分数据连同算子的状态一起做异步快照。
 

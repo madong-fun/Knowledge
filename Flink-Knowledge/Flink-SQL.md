@@ -1,5 +1,201 @@
 # FLink-SQL
 
+## Flink SQL 流程
+
+```
+// NOTE : 执行顺序是从上至下, " -----> " 表示生成的实例类型
+* 
+*        +-----> "left outer JOIN" (SQL statement)
+*        |   
+*        |     
+*     SqlParser.parseQuery // SQL 解析阶段，生成AST（抽象语法树），作用是SQL–>SqlNode      
+*        |   
+*        |      
+*        +-----> SqlJoin (SqlNode)
+*        |   
+*        |     
+*     SqlToRelConverter.convertQuery // 语义分析，生成逻辑计划，作用是SqlNode–>RelNode
+*        |    
+*        |     
+*        +-----> LogicalProject (RelNode) // Abstract Syntax Tree，未优化的RelNode   
+*        |      
+*        |     
+*    FlinkLogicalJoinConverter (RelOptRule) // Flink定制的优化rules      
+*    VolcanoRuleCall.onMatch // 基于Flink定制的一些优化rules去优化 Logical Plan 
+*        | 
+*        |   
+*        +-----> FlinkLogicalJoin (RelNode)  // Optimized Logical Plan，逻辑执行计划
+*        |  
+*        |    
+*    StreamExecJoinRule (RelOptRule) // Rule that converts FlinkLogicalJoin without window bounds in join condition to StreamExecJoin     
+*    VolcanoRuleCall.onMatch // 基于Flink rules将optimized LogicalPlan转成Flink物理执行计划
+*        |       
+*        |   
+*        +-----> StreamExecJoin (FlinkRelNode) // Stream physical RelNode，物理执行计划
+*        |      
+*        |     
+*    StreamExecJoin.translateToPlanInternal  // 作用是生成 StreamOperator, 即Flink算子  
+*        |     
+*        |     
+*        +-----> StreamingJoinOperator (StreamOperator) // Streaming unbounded Join operator in StreamTask   
+*        |     
+*        |       
+*    StreamTwoInputProcessor.processRecord1// 在TwoInputStreamTask调用StreamingJoinOperator，真实的执行 
+*        |
+*        |  
+
+```
+
+
+
+## Calcite
+
+
+
+FLink 并没有像Spark 一样，自行实现SQL解析和优化工作，而是使用了开源项目Calcite。
+
+### Calcite 处理流程
+
+Sql 的执行过程一般可以分为四个阶段，Calcite 与这个很类似，但Calcite是分成五个阶段 ：
+
+1. SQL 解析阶段，生成AST（抽象语法树）（SQL–>SqlNode）
+2. SqlNode 验证（SqlNode–>SqlNode）
+3. 语义分析，生成逻辑计划（Logical Plan）（SqlNode–>RelNode/RexNode）
+4. 优化阶段，按照相应的规则（Rule）进行优化（RelNode–>RelNode）
+5. 生成ExecutionPlan，生成物理执行计划（DataStream Plan）
+
+
+
+## Flink SQL相关对象
+
+
+
+### TableEnvironment
+
+TableEnvironment对象是Table API和SQL集成的一个核心，支持以下场景：
+
+- 注册一个Table。
+- 将一个TableSource注册给TableEnvironment，这里的TableSource指的是将数据存储系统的作为Table，例如mysql,hbase,CSV,Kakfa,RabbitMQ等等。
+- 注册一个外部的catalog，可以访问外部系统的数据或文件。
+- 执行SQL查询。
+- 注册一个用户自定义的function。
+- 将DataStream或DataSet转成Table。
+
+
+
+一个查询中只能绑定一个指定的TableEnvironment，TableEnvironment可以通过来配置TableConfig来配置，通过TableConfig可以自定义查询优化以及translation的进程。
+
+TableEnvironment执行过程如下：
+
+- TableEnvironment.sql()为调用入口；
+- Flink实现了FlinkPlannerImpl，执行parse(sql)，validate(sqlNode)，rel(sqlNode)操作；
+- 生成Table；
+
+
+
+```
+/**
+  * The abstract base class for batch and stream TableEnvironments.
+  *
+  * @param config The configuration of the TableEnvironment
+  */
+abstract class TableEnvironment(
+    private[flink] val execEnv: JavaStreamExecEnv,
+    val config: TableConfig) extends AutoCloseable {
+
+  protected val DEFAULT_JOB_NAME = "Flink Exec Table Job"
+
+  protected val catalogManager: CatalogManager = new CatalogManager()
+  private val currentSchema: SchemaPlus = catalogManager.getRootSchema
+
+  private val typeFactory: FlinkTypeFactory = new FlinkTypeFactory(new FlinkTypeSystem)
+
+  // Table API/SQL function catalog (built in, does not contain external functions)
+  private val functionCatalog: FunctionCatalog = BuiltInFunctionCatalog.withBuiltIns()
+
+  // Table API/SQL function catalog built in function catalog.
+  private[flink] lazy val chainedFunctionCatalog: FunctionCatalog =
+    new ChainedFunctionCatalog(Seq(functionCatalog))
+
+  // the configuration to create a Calcite planner
+  protected var frameworkConfig: FrameworkConfig = createFrameworkConfig
+
+  // the builder for Calcite RelNodes, Calcite's representation of a relational expression tree.
+  protected var relBuilder: FlinkRelBuilder = createRelBuilder
+
+  // the planner instance used to optimize queries of this TableEnvironment
+  private var planner: RelOptPlanner = createRelOptPlanner
+
+  // reuse flink planner
+  private var flinkPlanner: FlinkPlannerImpl = createFlinkPlanner
+
+  // a counter for unique attribute names
+  private[flink] val attrNameCntr: AtomicInteger = new AtomicInteger(0)
+
+  // a counter for unique table names
+  private[flink] val tableNameCntr: AtomicInteger = new AtomicInteger(0)
+
+  private[flink] val tableNamePrefix = "_TempTable_"
+
+  // sink nodes collection
+  private[flink] val sinkNodes = new mutable.MutableList[SinkNode]
+
+  private[flink] val transformations = new ArrayBuffer[StreamTransformation[_]]
+
+  protected var userClassloader: ClassLoader = null
+
+  // a manager for table service
+  private[flink] val tableServiceManager = new FlinkTableServiceManager(this)
+```
+
+
+
+### CataLog
+
+**Catalog** – 定义元数据和命名空间，包含 Schema（库），Table（表），RelDataType（类型信息）。
+
+所有对数据库和表的元数据信息都存放在Flink CataLog内部目录结构中，其存放了Flink内部所有与Table相关的元数据信息，包括表结构信息/数据源信息等。
+
+
+
+```
+public class CatalogManager {
+
+	// A list of named catalogs.
+	private Map<String, ReadableCatalog> catalogs;
+	
+	
+	
+/**
+ * This interface is responsible for reading database/table/views/UDFs from a registered catalog.
+ * It connects a registered catalog and Flink's Table API.
+ */
+public interface ReadableCatalog extends Closeable {
+
+
+
+/**
+ * An in-memory catalog.
+ */
+public class FlinkInMemoryCatalog implements ReadableWritableCatalog {
+
+	public static final String DEFAULT_DB = "default";
+
+	private String defaultDatabaseName = DEFAULT_DB;
+
+	private final String catalogName;
+	private final Map<String, CatalogDatabase> databases;
+	private final Map<ObjectPath, CatalogTable> tables;
+	private final Map<ObjectPath, Map<CatalogPartition.PartitionSpec, CatalogPartition>> partitions;
+	
+```
+
+
+
+
+
+
+
 
 
 ## 窗口函数
